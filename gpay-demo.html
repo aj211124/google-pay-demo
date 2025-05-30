@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Pay Basic Logic Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #gpay-container {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            min-height: 50px; /* To make it visible even if empty */
+            display: flex; /* Use flexbox to center content if needed */
+            justify-content: center;
+            align-items: center;
+        }
+        .gpay-button {
+            /* Basic styling for a visible button */
+            background-color: #4285F4;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .gpay-button:hover {
+            background-color: #357ae8;
+        }
+    </style>
+</head>
+<body>
+    <h1>Google Pay Sheet Test</h1>
+    <p>Check the console for output.</p>
+
+    <div id="gpay-container">
+        <p id="status-message">Loading Google Pay SDK...</p>
+    </div>
+
+    <script async
+        src="https://pay.google.com/gp/p/js/pay.js"
+        onload="onGooglePayLoaded()"></script>
+
+    <script>
+        // --- Dummy global objects to satisfy dependencies ---
+        const viewState = {
+            stateName: "DirectSubscribe", // Simulate a state where payment options are needed
+            googlePayOptions: {
+                // These are minimal options, adjust if you have real test keys
+                environment: 'TEST', // Use 'TEST' for testing, 'PRODUCTION' for live
+                totalPrice: '10.00',
+                currencyCode: 'USD',
+                countryCode: 'US',
+                merchantName: 'Your Test Merchant Name', // Use a real or clear test name
+                merchantId: 'YOUR_GOOGLE_PAY_MERCHANT_ID', // Replace with YOUR Google Pay Merchant ID
+                gateway: 'example', // A dummy gateway, replace with your actual gateway if testing real setup
+                gatewayMerchantId: 'exampleGatewayMerchantId', // Dummy
+                allowedAuthMethods: ['PAN_ONLY', 'CRYPTOGRAM_3DS'],
+                allowedCardNetworks: ['VISA', 'MASTERCARD'],
+                jsSdkScriptUrl: "https://pay.google.com/gp/p/js/pay.js" // Self-reference for helper
+            },
+            applePayOptions: { // Dummy Apple Pay options to avoid errors if ap_gp.js were included
+                jsSdkScriptUrl: ""
+            }
+        };
+
+        const helper = {
+            addScriptToHead: (url, id, callback) => {
+                console.log(`Helper: Simulating script load: ${url} (id: ${id})`);
+                if (window.google) {
+                    callback();
+                } else {
+                    console.error("Helper: Google Pay SDK not loaded immediately after simulating addScriptToHead.");
+                }
+            },
+            changeState: (newState) => {
+                console.log("Helper: Simulating state change to:", newState.stateName);
+            }
+        };
+
+        const __gateway = {
+            getFingerprintString: () => JSON.stringify({ device: "test", browser: "test" })
+        };
+
+        async function processPayment(paymentData) {
+            console.log("Processing payment (simulated)...");
+            console.log("Payment Data received:", paymentData);
+            return new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    console.log("Payment processed successfully (simulated).");
+                    helper.changeState({ stateName: "SubscriptionPolling", googlePaySuccess: true });
+                    resolve({ transactionState: "SUCCESS" });
+                }, 1000);
+            });
+        }
+
+        // --- googlePayHelper (from googlepay.js, adapted) ---
+        var googlePayHelper = {
+            initGooglePay(options, processPaymentCallback) {
+                if (!window.google) {
+                    console.error("googlePayHelper: Google Pay is not loaded/available.");
+                    return Promise.resolve(false);
+                }
+
+                const baseRequest = {
+                    apiVersion: 2,
+                    apiVersionMinor: 0,
+                };
+
+                const tokenizationSpecification = {
+                    type: "PAYMENT_GATEWAY",
+                    parameters: {
+                        "gateway": options.gateway,
+                        "gatewayMerchantId": options.gatewayMerchantId,
+                    },
+                };
+                // If using 'DIRECT' for testing, uncomment and modify:
+                // const tokenizationSpecification = {
+                //     type: "DIRECT",
+                //     parameters: {
+                //         "protocolVersion": "ECv2",
+                //         "publicKey": "YOUR_TEST_PUBLIC_KEY_HERE"
+                //     }
+                // };
+
+                // Define cardPaymentMethod here, accessible to both isReadyToPay and onClick
+                const cardPaymentMethod = {
+                    type: "CARD",
+                    parameters: {
+                        allowedAuthMethods: options.allowedAuthMethods,
+                        allowedCardNetworks: options.allowedCardNetworks,
+                    },
+                    tokenizationSpecification: tokenizationSpecification
+                };
+
+
+                const paymentsClient = new google.payments.api.PaymentsClient({
+                    environment: options.environment,
+                    paymentDataCallbacks: {
+                        onPaymentAuthorized: processPaymentCallback
+                    }
+                });
+
+                const isReadyToPayRequest = Object.assign({}, baseRequest);
+                isReadyToPayRequest.allowedPaymentMethods = [cardPaymentMethod];
+                isReadyToPayRequest.existingPaymentMethodRequired = true;
+
+                console.log("googlePayHelper: Calling paymentsClient.isReadyToPay() with request:", JSON.stringify(isReadyToPayRequest, null, 2));
+
+                return paymentsClient.isReadyToPay(isReadyToPayRequest)
+                    .then(function (response) {
+                        console.log("googlePayHelper: isReadyToPay() promise resolved. Response:", response);
+                        const statusMessage = document.getElementById('status-message');
+                        const gpayContainer = document.getElementById('gpay-container');
+
+                        if (response.result === true) {
+                            console.log("googlePayHelper: Google Pay is ready and user has an active card.");
+                            statusMessage.textContent = "Google Pay is ready! Click the button below to pay.";
+
+                            const googlePayButton = paymentsClient.createButton({
+                                buttonType: "buy",
+                                onClick: () => {
+                                    // cardPaymentMethod is now in scope!
+                                    const paymentDataRequest = Object.assign({}, baseRequest);
+                                    paymentDataRequest.allowedPaymentMethods = [cardPaymentMethod]; // Reuse cardPaymentMethod
+                                    paymentDataRequest.transactionInfo = {
+                                        totalPriceStatus: "FINAL",
+                                        totalPrice: options.totalPrice,
+                                        currencyCode: options.currencyCode,
+                                        countryCode: options.countryCode
+                                    };
+                                    paymentDataRequest.merchantInfo = {
+                                        merchantName: options.merchantName,
+                                        merchantId: options.merchantId,
+                                    };
+                                    paymentDataRequest.emailRequired = true;
+                                    paymentDataRequest.callbackIntents = ["PAYMENT_AUTHORIZATION"];
+
+                                    console.log("Attempting to load Google Pay payment sheet...");
+                                    paymentsClient.loadPaymentData(paymentDataRequest)
+                                        .catch(err => {
+                                            console.error("Error loading payment sheet:", err);
+                                        });
+                                }
+                            });
+
+                            if (gpayContainer) {
+                                gpayContainer.innerHTML = '';
+                                gpayContainer.appendChild(googlePayButton);
+                            }
+                            return true;
+                        } else {
+                            console.log("googlePayHelper: Google Pay is NOT ready or user does NOT have an active card (response.result was false).");
+                            statusMessage.textContent = "Google Pay is not available or you don't have an active card. (Check console)";
+                            if (gpayContainer) {
+                                gpayContainer.innerHTML = '';
+                                gpayContainer.appendChild(statusMessage);
+                            }
+                            return false;
+                        }
+                    })
+                    .catch(function (err) {
+                        console.error("googlePayHelper: isReadyToPay() promise rejected. Error during Google Pay readiness check:", err);
+                        const statusMessage = document.getElementById('status-message');
+                        statusMessage.textContent = "An error occurred checking Google Pay. (Check console)";
+                        return false;
+                    });
+            }
+        };
+
+        function onGooglePayLoaded() {
+            console.log("Google Pay SDK loaded.");
+            console.log("--- Automatically checking Google Pay Availability ---");
+            googlePayHelper.initGooglePay(viewState.googlePayOptions, processPayment)
+                .then(success => {
+                    if (!success) {
+                        console.log("Google Pay initialization failed.");
+                    }
+                })
+                .catch(err => {
+                    console.error("Error in automatic initGooglePay call:", err);
+                });
+        }
+    </script>
+</body>
+</html>
